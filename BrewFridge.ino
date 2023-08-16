@@ -8,7 +8,19 @@
 #include <DallasTemperature.h>
 #include "arduino_secrets.h"
 
-// Data wire is conntec to the Arduino digital pin 4
+#define TASMOTA_LOCAL_IP "192.168.1.180"
+
+#define INITIAL_MAX_BEER_TEMPERATURE 23.5
+#define INITIAL_MINTIME_FRIDGE_ON 90000
+
+// OutTopic: Publish all at once Fridge Temperature, Fridge Status, External Temperature
+// InTopic1: Subscribe to Max Beer Temperature
+// InTopic2: Subscribe to MinTime Fridge ON
+#define OUT_TOPIC "channels/2239528/publish"
+#define IN_TOPIC_MAX_BEER_TEMPERATURE "channels/2239528/subscribe/fields/field2";
+#define IN_TOPIC_MINTIME_FRIDGE_ON "channels/2239528/subscribe/fields/field4";
+
+// Data wire is conntec to the Arduino digital pin 10
 #define ONE_WIRE_BUS 10
 
 // Setup a oneWire instance to communicate with any OneWire devices
@@ -22,11 +34,14 @@ DallasTemperature sensors(&oneWire);
 WiFiClient mqttWifiClient;
 WiFiClient httpWifiClient;
 MqttClient mqttClient(mqttWifiClient);
-HttpClient client = HttpClient(httpWifiClient, "192.168.1.180", 80);
+HttpClient client = HttpClient(httpWifiClient, TASMOTA_LOCAL_IP, 80);
 
 ///////please enter your sensitive data in the Secret tab/arduino_secrets.h
 char ssid[] = SECRET_SSID;        // your network SSID (name)
 char pass[] = SECRET_PASS;        // your network password (use for WPA, or use as key for WEP)
+char mqttClientId[] = MQTT_CLIENT_ID;
+char mqttUsername[] = MQTT_USERNAME;
+char mqttPassword[] = MQTT_PASSWORD;
 
 int status = WL_IDLE_STATUS;
 
@@ -43,20 +58,26 @@ const int numCols = 16;
 // MQTT ThingSpeak Configuration
 const char broker[]    = "mqtt3.thingspeak.com";
 int        port        = 1883;
-const char * outTopic = "channels/2239528/publish";
+
+// OutTopic: Publish all at once Fridge Temperature, Fridge Status, External Temperature
+// InTopic1: Subscribe to Max Beer Temperature
+// InTopic2: Subscribe to MinTime Fridge ON
+const char * outTopic = OUT_TOPIC;
+const char * inTopic1 = IN_TOPIC_MAX_BEER_TEMPERATURE;
+const char * inTopic2 = IN_TOPIC_MINTIME_FRIDGE_ON;
 bool retained = false;
 int qos = 0;
 bool dup = false;
 
 // Temperatures variables
-float MaxBeerTemperature = 22.00;
+float maxBeerTemperature = INITIAL_MAX_BEER_TEMPERATURE;
 float fridgeTemperature;
 float externalTemperature;
 
 // Time variables
 unsigned long instantFridgeOn = millis();
 unsigned long timePassed;
-unsigned long minTimeFridgeOn = 15000;
+unsigned long minTimeFridgeOn = INITIAL_MINTIME_FRIDGE_ON;
 
 // Fridge Status
 #define ON "1"
@@ -72,10 +93,11 @@ void setup() {
   lcd.begin(numCols, numRows);
 
   lcd.setCursor(0,0);
-  lcd.write("Target T: ");
-
-  lcd.setCursor(0,1);
-  lcd.write("Actual T: ");
+  lcd.write("FT");
+  lcd.setCursor(6, 0);
+  lcd.print("ET");
+  lcd.setCursor(12, 0);
+  lcd.print("MT");
   
   // check for the WiFi module:
   if (WiFi.status() == WL_NO_MODULE) {
@@ -102,8 +124,8 @@ void setup() {
   
   printWifiStatus();
 
-  mqttClient.setId("KR8yEgonKT07KBAcIwUhMxU");
-  mqttClient.setUsernamePassword("KR8yEgonKT07KBAcIwUhMxU", "U1dsMLlq8BP36UqZSeosl5ey");
+  mqttClient.setId(mqttClientId);
+  mqttClient.setUsernamePassword(mqttUsername, mqttPassword);
   mqttClient.setCleanSession(true);
   
   if (!mqttClient.connect(broker, port)) {
@@ -118,8 +140,8 @@ void setup() {
 
   mqttClient.onMessage(onMqttMessage);
   
-  mqttClient.subscribe("channels/2239528/subscribe/fields/field2");
-  mqttClient.subscribe("channels/2239528/subscribe/fields/field4");
+  mqttClient.subscribe(inTopic1);
+  mqttClient.subscribe(inTopic2);
 }
 
 void loop() {
@@ -136,14 +158,21 @@ void loop() {
   Serial.print("Fridge temperature: ");
   Serial.print(fridgeTemperature);
   Serial.print("; External temperature: ");
-  Serial.println(externalTemperature);
+  Serial.print(externalTemperature);
+  Serial.print("; Max Beer Temperature: ");
+  Serial.print(maxBeerTemperature);
+  Serial.print("; MinTime Fridge ON: ");
+  Serial.println(minTimeFridgeOn);
 
-  lcd.setCursor(10, 0);  
-  lcd.print(MaxBeerTemperature);
-  lcd.setCursor(10,1);
+  lcd.setCursor(0,1);
   lcd.print(fridgeTemperature);
+  lcd.setCursor(6, 1);
+  lcd.print(externalTemperature);
+  lcd.setCursor(12, 1);
+  lcd.print(maxBeerTemperature);
+  
 
-  if( fridgeTemperature > MaxBeerTemperature ){
+  if( fridgeTemperature > maxBeerTemperature ){
 
     client.get("/cm?cmnd=Power%20On");
     // read the status code and body of the response
@@ -242,15 +271,15 @@ void onMqttMessage(int messageSize) {
   Serial.print(messageSize);
   Serial.println(" bytes:");
 
-  if(topic.equals("channels/2239528/subscribe/fields/field2")){
-    MaxBeerTemperature = message.toFloat();
+  if(topic.equals(inTopic1)){
+    maxBeerTemperature = message.toFloat();
 
-    Serial.print("New Beer Required Temperature: ");
-    Serial.println(MaxBeerTemperature);
+    Serial.print("New Max Beer Temperature: ");
+    Serial.println(maxBeerTemperature);
     Serial.println();
   }
 
-  if(topic.equals("channels/2239528/subscribe/fields/field4")){
+  if(topic.equals(inTopic2)){
     int seconds = message.toInt();
     minTimeFridgeOn = (unsigned long) seconds * 1000;
 
