@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=https://thingspeak.com/channels/2239528/import_export
+HostUrl=https://thingspeak.com/stream/channels/2239528/feeds
